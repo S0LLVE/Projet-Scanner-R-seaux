@@ -25,6 +25,9 @@ IP MAC
 Téléchargez la dernière version stable de Python :  
 🔗 https://www.python.org/downloads/
 
+Téléchargez et installez NPcap : https://npcap.com/#download
+Cochez : "Install Npcap in WinPcap API-compatible Mode"
+
 ### 2. Installer les dépendances Python
 
 Dans un terminal ou PowerShell :
