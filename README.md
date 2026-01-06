@@ -42,6 +42,8 @@ IP MAC Vendor Ports ouverts
 
 - Les résultats complets sont sauvegardés dans le fichier :
 
+scan_result.csv
+
 ---
 
 ## 🔐 Contexte d’utilisation
@@ -97,3 +99,4 @@ python arp_scan.py
 Scanner un réseau spécifique :
 
 python arp_scan.py 192.168.1.0/24
+
