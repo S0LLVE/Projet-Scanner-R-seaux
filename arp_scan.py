@@ -92,6 +92,8 @@ def main():
 
     mac_db = readCsvMac()
     ether = Ether(dst="ff:ff:ff:ff:ff:ff")
+    print("IP locale :", get_local_ip())
+    print("Réseau détecté :", detect_network())
     arp = ARP(pdst=str(net))
     packet = ether / arp
 

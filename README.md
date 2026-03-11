@@ -18,7 +18,7 @@ L’outil permet de :
 - Construire dynamiquement le réseau à scanner
 - Effectuer un **scan ARP par broadcast**
 - Identifier les hôtes actifs sur le réseau
-- Associer chaque adresse MAC à son **constructeur (vendor)**
+- Associer chaque adresse MAC à son **constructeur**
 - Réaliser un **scan SYN** sur une liste de ports courants
 - Exporter les résultats dans un fichier **CSV**
 
@@ -53,7 +53,6 @@ Cet outil peut être utilisé pour :
 - la **cartographie rapide d’un réseau local**
 - la détection de machines inconnues
 - un **pré-audit de sécurité**
-- des travaux pratiques en cybersécurité ou réseau
 
 ---
 
@@ -88,15 +87,18 @@ Lors de l’installation, cocher :
 
 ```bash
 pip install scapy psutil
+```
 
-▶️ Utilisation
+### 4. Utilisation
 
 Lancer le script :
 
+```bash
 python arp_scan.py
-
+```
 
 Scanner un réseau spécifique :
 
+```bash
 python arp_scan.py 192.168.1.0/24
-
+```
