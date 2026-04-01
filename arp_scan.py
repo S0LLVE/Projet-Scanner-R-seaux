@@ -1,6 +1,13 @@
-import csv, sys, socket, ipaddress, psutil, argparse, subprocess, re
-from scapy.all import ARP, Ether, srp, IP, TCP, sr1, RandShort, conf
-from network_map import generate_network_map
+import argparse
+import csv
+import ipaddress
+import re
+import socket
+import subprocess
+import sys
+
+import psutil
+from scapy.all import ARP, Ether, IP, TCP, RandShort, conf, sr1, srp, srp1
 
 MAC_FILE = "mac.csv"
 COMMON_PORTS = [21, 22, 23, 25, 53, 80, 110, 139, 143, 443, 445, 3306, 3389, 8080]
@@ -13,13 +20,27 @@ def read_mac_db():
     except FileNotFoundError:
         return {}
 
+
 def find_vendor(mac, mac_db):
     return mac_db.get(mac.upper().replace(":", "").replace("-", "")[:6], "Unknown")
 
+
 def get_local_ip():
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        for addrs in psutil.net_if_addrs().values():
+            for addr in addrs:
+                if (
+                    addr.family == socket.AF_INET
+                    and addr.address
+                    and not addr.address.startswith("127.")
+                ):
+                    return addr.address
+    raise RuntimeError("Impossible de detecter l'IP locale")
+
 
 def detect_network(local_ip):
     for addrs in psutil.net_if_addrs().values():
@@ -27,30 +48,32 @@ def detect_network(local_ip):
             if addr.family == socket.AF_INET and addr.address == local_ip and addr.netmask:
                 prefix = ipaddress.IPv4Network(f"0.0.0.0/{addr.netmask}").prefixlen
                 return ipaddress.ip_network(f"{local_ip}/{prefix}", strict=False)
-    raise RuntimeError("Impossible de détecter le réseau local")
+    raise RuntimeError("Impossible de detecter le reseau local")
+
 
 def get_gateway(local_ip):
-    # Tentative Windows (ipconfig)
     try:
         output = subprocess.check_output("ipconfig", text=True, encoding="utf-8", errors="ignore")
-        for block in output.split("\n\n"):
+        for block in re.split(r"\r?\n\r?\n", output):
             if local_ip in block:
-                m = re.search(r"(?:Passerelle par défaut|Default Gateway)[ .:]*([\d.]+)", block)
-                if m:
-                    return m.group(1)
-    except Exception:
-        pass
+                match = re.search(
+                    r"(?:Passerelle par defaut|Passerelle par défaut|Default Gateway)[ .:]*([\d.]+)",
+                    block,
+                )
+                if match:
+                    return match.group(1)
+    except Exception as exc:
+        print(f"Avertissement: echec de lecture de la gateway via ipconfig: {exc}", file=sys.stderr)
 
-    # Fallback : lire la table de routage via Scapy
     try:
-        from scapy.all import conf
-        gw = conf.route.route("0.0.0.0")[2]  # (iface, src_ip, gateway)
+        gw = conf.route.route("0.0.0.0")[2]
         if gw and gw != "0.0.0.0":
             return gw
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"Avertissement: echec de lecture de la gateway via Scapy: {exc}", file=sys.stderr)
 
     return None
+
 
 def get_iface(local_ip):
     for iface in conf.ifaces.values():
@@ -58,28 +81,35 @@ def get_iface(local_ip):
             return iface.name
     return None
 
-def syn_scan(ip, port, timeout=0.2):
-    pkt = IP(dst=ip) / TCP(sport=RandShort(), dport=port, flags="S")
-    resp = sr1(pkt, timeout=timeout, verbose=False)
+
+def syn_scan(ip, port, timeout=0.2, target_mac=None, iface=None):
+    if target_mac:
+        pkt = Ether(dst=target_mac) / IP(dst=ip) / TCP(sport=RandShort(), dport=port, flags="S")
+        resp = srp1(pkt, timeout=timeout, verbose=False, **({"iface": iface} if iface else {}))
+    else:
+        pkt = IP(dst=ip) / TCP(sport=RandShort(), dport=port, flags="S")
+        resp = sr1(pkt, timeout=timeout, verbose=False)
     if resp and resp.haslayer(TCP):
         return {0x12: "open", 0x14: "closed"}.get(resp[TCP].flags, "filtered")
     return "filtered"
 
+
 def arp_scan(net, iface, local_ip=None):
     pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=str(net))
     answered, _ = srp(pkt, timeout=2, retry=1, verbose=False, **{"iface": iface} if iface else {})
-    seen = {local_ip} if local_ip else set()  # exclut d'emblée le scanner lui-même
+    seen = {local_ip} if local_ip else set()
     hosts = []
-    for _, r in answered:
-        if r.psrc not in seen:
-            hosts.append((r.psrc, r.hwsrc))
-            seen.add(r.psrc)
+    for _, response in answered:
+        if response.psrc not in seen:
+            hosts.append((response.psrc, response.hwsrc))
+            seen.add(response.psrc)
     return hosts
+
 
 def main():
     parser = argparse.ArgumentParser(description="ARP Network Scanner")
-    parser.add_argument("network", nargs="?", help="Réseau à scanner, ex: 192.168.1.0/24")
-    parser.add_argument("--map", action="store_true", help="Génère une carte réseau PNG")
+    parser.add_argument("network", nargs="?", help="Reseau a scanner, ex: 192.168.1.0/24")
+    parser.add_argument("--map", action="store_true", help="Genere une carte reseau PNG")
     args = parser.parse_args()
 
     local_ip = get_local_ip()
@@ -88,17 +118,17 @@ def main():
     iface = get_iface(local_ip)
     mac_db = read_mac_db()
 
-    print(f"IP locale : {local_ip}\nRéseau détecté : {net}\nGateway détectée : {gateway_ip}\nInterface Scapy : {iface}")
+    print(f"IP locale : {local_ip}\nReseau detecte : {net}\nGateway detectee : {gateway_ip}\nInterface Scapy : {iface}")
     print("Scan ARP en cours...")
 
     try:
-        hosts = arp_scan(net, iface, local_ip=local_ip)  # ✅ un seul appel, avec filtre
-    except Exception as e:
-        print(f"Erreur pendant le scan ARP : {e}")
-        sys.exit()
+        hosts = arp_scan(net, iface, local_ip=local_ip)
+    except Exception as exc:
+        print(f"Erreur pendant le scan ARP : {exc}")
+        sys.exit(1)
 
     total = len(hosts)
-    print(f"[+] {total} hôtes détectés\n")
+    print(f"[+] {total} hotes detectes\n")
 
     scan_results = []
     with open("scan_result.csv", "w", newline="", encoding="utf-8") as f:
@@ -108,14 +138,20 @@ def main():
         for i, (ip, mac) in enumerate(hosts, 1):
             print(f"[{i}/{total}] Scan de {ip} ...", end="\r")
             company = find_vendor(mac, mac_db)
-            open_ports = [p for p in COMMON_PORTS if syn_scan(ip, p) == "open"]
+            open_ports = [p for p in COMMON_PORTS if syn_scan(ip, p, target_mac=mac, iface=iface) == "open"]
             writer.writerow([ip, mac, company, ",".join(map(str, open_ports))])
             scan_results.append({"ip": ip, "mac": mac, "company": company, "ports": open_ports})
 
-    print("\nScan terminé. Résultats enregistrés dans scan_result.csv")
+    print("\nScan termine. Resultats enregistres dans scan_result.csv")
 
     if args.map:
-        generate_network_map(scan_results, local_ip, net, gateway_ip)
+        try:
+            from network_map import generate_network_map
+        except ImportError as exc:
+            print(f"Impossible de generer la carte reseau: dependance manquante ({exc})", file=sys.stderr)
+        else:
+            generate_network_map(scan_results, local_ip, net, gateway_ip)
+
 
 if __name__ == "__main__":
     main()

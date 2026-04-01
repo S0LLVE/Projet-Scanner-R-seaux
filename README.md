@@ -104,7 +104,7 @@ https://npcap.com/#download
 
 ### 3. Installer les dépendances Python
 ```bash
-pip install scapy psutil networkx matplotlib
+pip install -r requirements.txt
 ```
 
 | Package | Rôle |
