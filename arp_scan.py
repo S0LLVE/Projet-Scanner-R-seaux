@@ -30,6 +30,7 @@ def detect_network(local_ip):
     raise RuntimeError("Impossible de détecter le réseau local")
 
 def get_gateway(local_ip):
+    # Tentative Windows (ipconfig)
     try:
         output = subprocess.check_output("ipconfig", text=True, encoding="utf-8", errors="ignore")
         for block in output.split("\n\n"):
@@ -39,6 +40,16 @@ def get_gateway(local_ip):
                     return m.group(1)
     except Exception:
         pass
+
+    # Fallback : lire la table de routage via Scapy
+    try:
+        from scapy.all import conf
+        gw = conf.route.route("0.0.0.0")[2]  # (iface, src_ip, gateway)
+        if gw and gw != "0.0.0.0":
+            return gw
+    except Exception:
+        pass
+
     return None
 
 def get_iface(local_ip):
